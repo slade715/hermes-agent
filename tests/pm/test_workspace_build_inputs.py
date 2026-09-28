@@ -282,3 +282,42 @@ def test_nested_dist_travels_but_root_dist_stays_out(tmp_path):
 
     assert (destination / "plugins/kanban/dashboard/dist/index.js").read_text(encoding="utf-8") == "ENTRY\n"
     assert not (destination / "dist").exists(), "root build output never enters the snapshot"
+
+
+def test_root_command_launcher_travels_into_the_snapshot(tmp_path):
+    """A PM install resolves PROJECT_ROOT to the snapshot; `hermes doctor` looks for the
+    entry point there, so an extensionless root launcher must reach the copy."""
+    core = tmp_path / "core"
+    core.mkdir()
+    (core / "pyproject.toml").write_text(
+        '[project]\nname="core"\nversion="1"\nrequires-python=">=3.11"\n'
+        '[tool.setuptools.packages.find]\ninclude=["pm"]\n',
+        encoding="utf-8",
+    )
+    (core / "hermes").write_text("#!/usr/bin/env python3\nENTRY\n", encoding="utf-8")
+    (core / "cli.py").write_text("MODULE\n", encoding="utf-8")
+    (core / "activate").write_text("dev-only shell helper\n", encoding="utf-8")
+
+    destination = tmp_path / "stage"
+    workspace._copy_core_inputs(core, destination)
+
+    assert (destination / "hermes").is_file(), "the snapshot root is where doctor resolves the entry point"
+    assert (destination / "hermes").read_text(encoding="utf-8") == "#!/usr/bin/env python3\nENTRY\n"
+    assert (destination / "cli.py").is_file()
+    assert not (destination / "activate").exists(), "only the declared command launchers travel"
+
+
+def test_missing_root_launcher_is_not_an_error(tmp_path):
+    """A source without the launcher stages cleanly; the copy is additive, never required."""
+    core = tmp_path / "core"
+    core.mkdir()
+    (core / "pyproject.toml").write_text(
+        '[project]\nname="core"\nversion="1"\nrequires-python=">=3.11"\n'
+        '[tool.setuptools.packages.find]\ninclude=["pm"]\n',
+        encoding="utf-8",
+    )
+
+    destination = tmp_path / "stage"
+    workspace._copy_core_inputs(core, destination)
+
+    assert not (destination / "hermes").exists()

@@ -22,6 +22,13 @@ from pm.plugin_declarations import read_python_declaration, manifest_version_err
 
 _MEMBER_EXCLUDE = frozenset({".git", ".venv", "venv", "node_modules", "__pycache__"})
 
+#: Extensionless command launchers that live at the repository root. They are runtime
+#: entry points, not packaging metadata, so no `find` pattern matches them — but a staged
+#: workspace IS `PROJECT_ROOT` for a PM install, and `hermes doctor` resolves the install's
+#: entry point there. Missing from the snapshot, every PM install reports
+#: "Hermes entry point not found".
+ROOT_COMMAND_LAUNCHERS = ("hermes",)
+
 
 def _member_ignored(directory, names):
     return [name for name in names if name in _MEMBER_EXCLUDE or name.endswith(".egg-info")]
@@ -81,6 +88,9 @@ def _copy_core_inputs(source: Path, destination: Path) -> None:
     for pattern in project.get("license-files", []):
         files.update(str(p.relative_to(source)) for p in source.glob(pattern))
     files.update(p.name for p in source.glob("*.py"))
+    # The extensionless root command launchers ride along with the root modules: the
+    # snapshot's root is the project root the runtime and `hermes doctor` resolve against.
+    files.update(name for name in ROOT_COMMAND_LAUNCHERS if (source / name).is_file())
 
     # uv.lock is not excluded: the root lock is never copied (only ``files`` are; lock_and_sync
     # seeds or resolves it), and pm/uv.lock is the PM runtime's input (pm/runtime.py::_inputs).
