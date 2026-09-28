@@ -208,3 +208,63 @@ def test_populated_platforms_produce_no_empty_list_warning():
     cfg = {"cli": ["hermes-cli"], "telegram": ["hermes-telegram"]}
     warnings = validate_platform_toolsets(cfg, _is_valid)
     assert warnings == []
+
+
+def test_explicit_plugin_platform_default_is_not_unknown():
+    """A dynamic plugin platform listed with its own synthesized default resolves — so listing it
+    explicitly must not be reported as unknown.
+
+    The platform-default branch resolves ``hermes-<platform>`` through the platform registry; the
+    explicit-list branch did not, so for ``teams: [hermes-teams]`` it rejected the name and
+    suggested the identical name back ("did you mean 'hermes-teams'?"), then contradicted the
+    ``default_valid`` it had itself computed by claiming the agent would have no tools.
+    """
+    from gateway.platform_registry import PlatformEntry, platform_registry
+    from toolsets import resolve_toolset
+
+    platform = "toolset_validation_explicit_plugin"
+    platform_registry.register(
+        PlatformEntry(
+            name=platform,
+            label="Toolset Validation Explicit Plugin",
+            adapter_factory=lambda _config: object(),
+            check_fn=lambda: True,
+        )
+    )
+    try:
+        cfg = {platform: [f"hermes-{platform}"], "telegram": ["hermes-telegram"]}
+        warnings = validate_platform_toolsets(cfg, _is_valid)
+
+        # The premise: the name really does resolve at runtime.
+        assert resolve_toolset(f"hermes-{platform}")
+        assert not any(f"unknown toolset 'hermes-{platform}'" in w for w in warnings)
+        assert not any("no valid toolsets" in w for w in warnings)
+        assert warnings == []
+    finally:
+        platform_registry.unregister(platform)
+
+
+def test_explicit_plugin_platform_still_flags_a_genuinely_unknown_name():
+    """The relaxation above is keyed on the platform's own default, not on the platform being a
+    plugin platform — a real typo in the list must still be reported."""
+    from gateway.platform_registry import PlatformEntry, platform_registry
+
+    platform = "toolset_validation_explicit_plugin_typo"
+    platform_registry.register(
+        PlatformEntry(
+            name=platform,
+            label="Toolset Validation Explicit Plugin Typo",
+            adapter_factory=lambda _config: object(),
+            check_fn=lambda: True,
+        )
+    )
+    try:
+        cfg = {platform: ["totally_bogus"], "telegram": ["hermes-telegram"]}
+        warnings = validate_platform_toolsets(cfg, _is_valid)
+
+        assert any("unknown toolset 'totally_bogus'" in w for w in warnings)
+        assert any(f"platform '{platform}'" in w and "no valid toolsets" in w for w in warnings)
+        # telegram is valid, so the global net stays suppressed.
+        assert not any("zero valid toolsets" in w for w in warnings)
+    finally:
+        platform_registry.unregister(platform)

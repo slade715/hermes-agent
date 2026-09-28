@@ -29,7 +29,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple, Set
+from typing import Dict, Any, Optional, List, Tuple, Set, Callable
 
 import hermes_yaml as yaml
 
@@ -1445,16 +1445,38 @@ def _disable_suspicious_mcp_servers(results: Dict[str, Any], quiet: bool) -> Non
         _persist_migration(config)
 
 
+def _platform_toolset_validator() -> Callable[[str], bool]:
+    """Predicate for a ``platform_toolsets`` name that really resolves at runtime.
+
+    ``toolsets.validate_toolset`` only knows the core ``TOOLSETS`` map. A plugin toolset is
+    registered by its plugin at load time (under the manifest name with ``-`` normalised to
+    ``_`` — see ``plugins/jev-tools/__init__.py``), so it reads as unknown and its platform is
+    then reported as having no tools, even though ``resolve_toolset()`` returns the tools and the
+    plugin's tools load. Fold the live plugin toolset keys in so the warning fires only for a
+    name that resolves to nothing.
+    """
+    from toolsets import validate_toolset
+
+    try:
+        from hermes_cli.plugins import get_plugin_toolset_keys_nowait
+
+        plugin_keys = get_plugin_toolset_keys_nowait()
+    except Exception:  # plugin discovery is best-effort; never block the caller
+        plugin_keys = frozenset()
+
+    return lambda name: validate_toolset(name) or name in plugin_keys
+
+
 def _warn_invalid_platform_toolsets(results: Dict[str, Any], quiet: bool) -> None:
     """Surface invalid toolset names in platform_toolsets: ``resolve_toolset()`` returns [] for an
     unknown name, silently disabling the affected tools. Best-effort; never blocks migration."""
     try:
-        from toolsets import validate_toolset
         from hermes_cli.toolset_validation import validate_platform_toolsets
         from hermes_cli.toolset_scope import toolset_allowed_for_platform
 
         for w in validate_platform_toolsets(
-                read_raw_config().get("platform_toolsets"), validate_toolset, toolset_allowed_for_platform):
+                read_raw_config().get("platform_toolsets"), _platform_toolset_validator(),
+                toolset_allowed_for_platform):
             results["warnings"].append(w)
             if not quiet:
                 print(f"  ⚠ {w}")

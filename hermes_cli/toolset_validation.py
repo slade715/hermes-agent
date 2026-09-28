@@ -92,6 +92,17 @@ def validate_platform_toolsets(
             if not isinstance(name, str) or not name:
                 continue
             if not is_valid_toolset(name):
+                # A dynamic plugin platform's synthesized `hermes-<platform>` name is absent from
+                # TOOLSETS but is accepted as this platform's default above (it resolves, and the
+                # platform is registered). Listing it explicitly is therefore not "unknown" —
+                # without this the warning pointed the user at the very name it had just rejected
+                # ("unknown toolset 'hermes-teams' — did you mean 'hermes-teams'?") and then
+                # claimed the agent would have no tools on a platform whose default it had just
+                # validated two lines earlier.
+                if default_valid and name == default:
+                    valid_count += 1
+                    platform_valid_count += 1
+                    continue
                 hint = f" — did you mean '{default}'?" if default_valid else ""
                 warnings.append(f"platform '{platform}' references unknown toolset '{name}'{hint}")
             elif is_allowed_for_platform(name, str(platform)):
